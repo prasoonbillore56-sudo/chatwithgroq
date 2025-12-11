@@ -1,66 +1,86 @@
 import os
-
-import streamlit as st
-from dotenv import load_dotenv
 from groq import Groq
+from dotenv import load_dotenv
+import streamlit as st
 
 load_dotenv()
 
+# ...existing code...
+# Streamlit UI + Groq client integration
 
-def init_client() -> Groq | None:
-    """Instantiate the Groq client if the API key is available."""
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        st.error("Missing GROQ_API_KEY. Add it to your environment or .env file.")
-        return None
-    return Groq(api_key=api_key)
+st.set_page_config(page_title="Groq Chat UI", layout="wide")
+st.title("Groq Chat - Streamlit Frontend")
+st.markdown("Enter a query below and click Send. Responses and history are displayed on the right.")
 
+# Ensure API key is available
+API_KEY = os.getenv("GROQ_API_KEY")
+if not API_KEY:
+    st.error("GROQ_API_KEY not found in environment. Please set it in your .env file.")
+    st.stop()
 
-def main() -> None:
-    st.set_page_config(page_title="Groq Chat UI", layout="centered", page_icon="💬")
-    st.title("Groq Chat Playground")
-    st.caption("Ask anything and get a response powered by openai/gpt-oss-20b.")
+# Initialize client once
+client = Groq(api_key=API_KEY)
 
-    prompt = st.text_area(
-        "Your prompt",
-        placeholder="Type your question or instructions here...",
-        height=150,
-    )
+# Session state for history
+if "history" not in st.session_state:
+    st.session_state.history = []  # list of (user_prompt, assistant_reply)
 
-    col_run, col_clear = st.columns([1, 1], gap="large")
-    run_clicked = col_run.button("Generate Response", type="primary", use_container_width=True)
-    clear_clicked = col_clear.button("Clear", use_container_width=True)
+# Layout: left column for input, right column for response & history
+left_col, right_col = st.columns([1, 2])
 
-    if clear_clicked:
-        st.experimental_rerun()
+with left_col:
+    with st.form("query_form", clear_on_submit=False):
+        query = st.text_area("Enter your query", height=160, placeholder="Ask a question for Groq model...")
+        model = st.selectbox("Model", options=["openai/gpt-oss-120b"], help="Select model (default available option).")
+        submitted = st.form_submit_button("Send")
+        clear_history = st.form_submit_button("Clear history")
 
-    if not run_clicked:
-        return
+    if clear_history:
+        st.session_state.history = []
+        st.success("History cleared.")
 
-    if not prompt.strip():
-        st.warning("Please enter a prompt before requesting a response.")
-        return
+# Handle submission
+if submitted and query:
+    with st.spinner("Sending request to Groq..."):
+        try:
+            chat_completion = client.chat.completions.create(
+                messages=[{"role": "user", "content": query}],
+                model=model,
+            )
+            reply = chat_completion.choices[0].message.content
+        except Exception as e:
+            reply = None
+            st.error(f"Request failed: {e}")
 
-    client = init_client()
-    if client is None:
-        return
+    if reply is not None:
+        # store and show result
+        st.session_state.history.insert(0, (query, reply))
 
-    with st.spinner("Generating response..."):
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                }
-            ],
-            model="openai/gpt-oss-20b",
-        )
+# Right column: show latest response and expandable history
+with right_col:
+    st.subheader("Latest response")
+    if st.session_state.history:
+        user_q, bot_reply = st.session_state.history[0]
+        st.markdown("*You:*")
+        st.write(user_q)
+        st.markdown("*Groq:*")
+        st.text_area("Response", value=bot_reply, height=200, key="latest_response", disabled=True)
+    else:
+        st.info("No responses yet. Submit a query from the left.")
 
-    message = chat_completion.choices[0].message.content.strip()
-    st.subheader("Response")
-    st.write(message)
+    st.markdown("---")
+    st.subheader("Conversation history")
+    if st.session_state.history:
+        for i, (u, b) in enumerate(st.session_state.history):
+            with st.expander(f"Turn {len(st.session_state.history)-i}: {u[:60]}...", expanded=(i == 0)):
+                st.markdown("*You:*")
+                st.write(u)
+                st.markdown("*Groq:*")
+                st.write(b)
+    else:
+        st.write("History is empty.")
 
+# Helpful note for Windows users
+st.caption("Running locally on Windows: in the project folder run streamlit run main.py.")
 
-if __name__ == "__main__":
-    main()
-
+# ...existing code...
